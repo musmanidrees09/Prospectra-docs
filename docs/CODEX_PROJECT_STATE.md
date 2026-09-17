@@ -108,3 +108,12 @@ Previous verification on 2026-09-11:
 - Authenticated browser smoke: login, all admin overview cards, global sales activity, proposal creation, cross-workspace report opening, report section tabs, provider-name redaction, and mobile audit layout rendered successfully with no page errors.
 - Browser accessibility scan: axe-core 4.12.1 reported zero WCAG A/AA violations on the authenticated audit report.
 - Final report screenshot: dogfood-output/screenshots/final-authenticated-audit-report.png.
+
+## Responsive QA matrix (2026-09-17)
+
+Full route sweep via headless Chrome (`frontend/scripts/qa-responsive.cjs`): 5 breakpoints (320/375/768/1024/1440) x 16 anonymous routes + 25 authenticated routes = 205 checks per run. Measures horizontal overflow (>2px), HTTP status, and console errors.
+
+**Result:** 203/205 ok. One real defect found and fixed:
+- Public audit report `/audit/{share_token}`: the X/LinkedIn/WhatsApp share row (three `flex-1` nowrap buttons) could not shrink below min-content and overflowed at 320px/375px. Fixed in `src/components/audit/report-share.tsx` by making the row wrap; re-verified 0px overflow at 320/375/430.
+
+**Tool:** `node scripts/qa-responsive.cjs --base http://localhost:PORT [--sizes 320,375,768,1024,1440]` — parameterized (base URL, API URL, QA credentials, sizes, output file); requires a QA admin account and running backend. Verify share-button pass: not part of the sweep (needs a live share token; pass `--share-token` to include the public report route).
