@@ -134,3 +134,13 @@ Method: `frontend/scripts/qa-cwv.cjs` — Lighthouse 12, mobile throttling, medi
 4. Notification-preference defaults moved to `src/constants/notification-preferences.ts` so the settings page doesn't statically import auth.service.
 
 **Remaining known bottleneck:** LCP ~3.4s is dominated by the Inter webfont swap under Lighthouse's throttled CPU/network (LCP element is the hero paragraph). Options for a future pass: `adjustFontFallback` tuning, `size-adjust`-matched fallback, or accepting system-font flash via `font-display: optional`. The 112KB `polyfillFiles` chunk (core-js + axios) is `noModule`-gated and never executed by modern browsers — not a real-world cost.
+
+## Backend availability incident (2026-09-17)
+
+**Symptom:** `[api] Could not reach http://localhost:8001/api/v1/notifications ... Network Error` in the browser console while the backend process was technically listening.
+
+**Root causes, both fixed:**
+1. The backend had been hand-launched with a nonexistent router script (`php -S 127.0.0.1:8001 backend/server.php`), so every request returned 200 + PHP fatal-error HTML with no CORS headers — browsers report that as Network Error. Relaunched correctly with `php artisan serve --host=127.0.0.1 --port=8001`. Lesson: always verify with `curl -i -H "Origin: ..."`, not status alone.
+2. `php -S` (and `artisan serve`) is single-request-at-a-time on Windows; `PHP_CLI_SERVER_WORKERS` is POSIX-only and silently ignored. Slow requests (audit crawl) queue everything else. Mitigated client-side in `axios.ts` (commit ac96f79): idempotent GETs retry twice with short backoff on no-response failures before surfacing "Network Error".
+
+For real parallelism locally, use Laragon's Apache/nginx + php-fpm, or Octane/Swoole — noted as a deployment concern, not a local-dev blocker.
