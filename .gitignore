@@ -1,0 +1,19 @@
+# The real repos are the nested ones — never let the root repo swallow them
+/backend/
+/frontend/
+
+# Tooling / workspace artifacts
+/.codex/
+/.freebuff/
+/.superpowers/
+/.pnpm-store/
+/.tmp/
+/.vscode/
+/dogfood-output/
+.tmp-*
+*.log
+
+# Never track secrets anywhere
+.env
+.env.*
+*.key
