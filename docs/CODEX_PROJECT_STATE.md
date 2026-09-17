@@ -117,3 +117,20 @@ Full route sweep via headless Chrome (`frontend/scripts/qa-responsive.cjs`): 5 b
 - Public audit report `/audit/{share_token}`: the X/LinkedIn/WhatsApp share row (three `flex-1` nowrap buttons) could not shrink below min-content and overflowed at 320px/375px. Fixed in `src/components/audit/report-share.tsx` by making the row wrap; re-verified 0px overflow at 320/375/430.
 
 **Tool:** `node scripts/qa-responsive.cjs --base http://localhost:PORT [--sizes 320,375,768,1024,1440]` — parameterized (base URL, API URL, QA credentials, sizes, output file); requires a QA admin account and running backend. Verify share-button pass: not part of the sweep (needs a live share token; pass `--share-token` to include the public report route).
+
+## Core Web Vitals pass (2026-09-17)
+
+Method: `frontend/scripts/qa-cwv.cjs` — Lighthouse 12, mobile throttling, medians over 3-5 runs, against `next build && next start` (port 3115). LCP element on both pages is body text in Inter (font-swap dependent).
+
+**Before -> after (mobile, medians):**
+- Home: perf 87 -> 90, FCP 1.23s -> 1.69s*, LCP 3.62s -> 3.43s, TBT 207ms -> 97ms (-53%), CLS 0.0000 -> 0.0000
+- Blog article: perf 86 -> 91, FCP 1.24s -> 1.39s*, LCP 3.65s -> 3.24s, TBT 222ms -> 132ms (-41%), CLS 0.0000 -> 0.0000
+- *FCP medians drifted up with run count (local noise); per-run variance was high, LCP/TBT medians were stable.
+
+**Changes (commit 67eb236):**
+1. Auth service (axios) is lazily imported in `use-auth.ts`; `useCurrentUser` is disabled without a token, so anonymous visitors make zero API calls and never download the API client (verified with a request-listening smoke test).
+2. `AuditWidget` dynamically imports `audit.service` at submit time (type-only imports remain static).
+3. `layout.tsx`: `preload: false` on Playfair Display + JetBrains Mono; only Inter is preloaded now.
+4. Notification-preference defaults moved to `src/constants/notification-preferences.ts` so the settings page doesn't statically import auth.service.
+
+**Remaining known bottleneck:** LCP ~3.4s is dominated by the Inter webfont swap under Lighthouse's throttled CPU/network (LCP element is the hero paragraph). Options for a future pass: `adjustFontFallback` tuning, `size-adjust`-matched fallback, or accepting system-font flash via `font-display: optional`. The 112KB `polyfillFiles` chunk (core-js + axios) is `noModule`-gated and never executed by modern browsers — not a real-world cost.
