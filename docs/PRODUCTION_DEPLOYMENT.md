@@ -44,6 +44,16 @@ The install must report pnpm and succeed silently on the frozen lockfile — if 
 
 Deploy the generated Next.js application with its production start command or the hosting adapter already used by the project. If the host runs its own install step (dashboard builds, Git-push deploys), configure it to use pnpm with the lockfile — a host that defaults to npm will drift again.
 
+### Hostinger Node.js deployment (hbuilds pipeline)
+
+Hostinger's Git deployment pipeline runs `npm install` by default (then retries with `--legacy-peer-deps`), which the repo's `only-allow pnpm` preinstall guard now blocks — by design; the 2026-09-29 log shows exactly that block. Configure the deployment in hPanel → Websites → prospetra.com → Deployments → edit the build settings:
+
+- Install command: `npx --yes pnpm@11 install --frozen-lockfile`
+- Build command: `npx --yes pnpm@11 build`
+- Start command: unchanged
+
+`npx pnpm` needs no global install and satisfies the preinstall guard (pnpm's user agent is what `only-allow` checks). Do not remove the guard to let npm through — if the install/build command fields are not editable on the plan, the fallback is to drop the guard and commit a generated `package-lock.json` for determinism, which is a deliberate decision to record here first.
+
 ## Post-deploy verification
 
 After each deploy:
