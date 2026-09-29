@@ -70,7 +70,7 @@ Resolution order for a repeat of the panic (2026-09-29, CI evidence attached):
 
 1. **Prove the checkout is current.** The failing log showed npm installing 858 packages — impossible on code containing the `only-allow pnpm` preinstall guard. The box was building a stale checkout. Run `git fetch origin && git log --oneline -1` and require it to match `origin/main` before anything else.
 2. **Install and build with pnpm** exactly as the Frontend release section says. CI's ubuntu build job is the reference: on commit `166d302` it built this same tree green on Linux with next 16.3.6, so a genuine fresh checkout has no known build failure.
-3. **If Turbopack still panics on the box**, build with webpack once to unblock the deploy: `pnpm build:webpack` (same Next version, bypasses Turbopack's PostCSS worker where the panic occurs). Report the panic log upstream, then treat the box's environment (memory limits, /tmp space, Node build) as the suspect.
+3. **If Turbopack still panics on the box**, build with webpack: the panic occurred on a clean checkout (`b0a1289`, current pnpm pin) so `build` now runs `next build --webpack` by default (frontend `26508f4`); `build:turbopack` keeps the Turbopack path for local use. Report the panic log upstream, then treat the box's environment (memory limits, /tmp space, Node build) as the suspect.
 4. Confirm what the box actually runs: `pnpm list next --depth=0` must print the version pinned in `package.json`.
 
 ## 2026-09-29 corepack pin mismatch (resolved)
