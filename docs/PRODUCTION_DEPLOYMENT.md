@@ -77,6 +77,10 @@ Resolution order for a repeat of the panic (2026-09-29, CI evidence attached):
 
 After Hostinger switched to pnpm, the deploy failed with `[ERROR] This project is configured to use 11.15.1 of pnpm. Your current pnpm is v11.21.0`. Cause: pnpm invoked through corepack does not self-switch versions, so the box's corepack pnpm 11.21.0 hard-failed against the strict `packageManager` check. Fix: `packageManager` bumped to `pnpm@11.21.0` (frontend `b0a1289`). Local direct-pnpm invocations auto-switch to the declared version, so keep the pin aligned with the deploy box's corepack pnpm if Hostinger upgrades it again. The `only-allow pnpm` preinstall guard stays.
 
+## 2026-09-29 runtime blank page: @swc/helpers not resolvable on the box (resolved)
+
+The first green deploy (frontend `26508f4`) still served blank pages: every route returned 200 with 0 bytes and metadata routes (robots/sitemap) returned plain-text 500. Runtime log: `Cannot find module '@swc/helpers/_/_interop_require_default'` from inside next's own require stacks — the box's staged pnpm tree exposes the transitive package only via the virtual store, which Node cannot resolve there (local direct installs can hoist a top-level copy, masking it). Fix: `@swc/helpers` pinned exact `0.5.23` (the version next 16.3.6 declares) as a direct dependency so pnpm materializes a real top-level copy (frontend `991f668`). Diagnostic signature to remember: static `/_next/*` assets fine + dynamic routes empty-200 = the Node server crashes per-request while static file serving still works; check runtime logs before blaming the build.
+
 ## Queue and scheduler
 
 Run a supervised worker and restart it on each deployment:
