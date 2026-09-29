@@ -81,6 +81,8 @@ After Hostinger switched to pnpm, the deploy failed with `[ERROR] This project i
 
 The first green deploy (frontend `26508f4`) still served blank pages: every route returned 200 with 0 bytes and metadata routes (robots/sitemap) returned plain-text 500. Runtime log: `Cannot find module '@swc/helpers/_/_interop_require_default'` from inside next's own require stacks — the box's staged pnpm tree exposes the transitive package only via the virtual store, which Node cannot resolve there (local direct installs can hoist a top-level copy, masking it). Fix: `@swc/helpers` pinned exact `0.5.23` (the version next 16.3.6 declares) as a direct dependency so pnpm materializes a real top-level copy (frontend `991f668`). Diagnostic signature to remember: static `/_next/*` assets fine + dynamic routes empty-200 = the Node server crashes per-request while static file serving still works; check runtime logs before blaming the build.
 
+Update (same day, frontend `0f2749c`): the direct-dependency pin alone was NOT sufficient — after it deployed (commit `932840e`, Completed/Current), the box failed identically. Root cause: Hostinger stages the built app into `versions/<id>/nodejs`, and pnpm's symlink-based tree does not survive that copy, so next-server cannot resolve packages even when a top-level copy exists. Fix: `nodeLinker: hoisted` in `pnpm-workspace.yaml` — pnpm builds an npm-style tree of real directories with zero symlinks, which is staging-proof. Verify after any change to dependency settings: `node -e "const e=require('fs').readdirSync('node_modules',{withFileTypes:true});console.log(e.filter(x=>x.isSymbolicLink()).length)"` must print 0.
+
 ## Queue and scheduler
 
 Run a supervised worker and restart it on each deployment:
