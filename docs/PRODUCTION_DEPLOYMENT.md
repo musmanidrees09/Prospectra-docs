@@ -1,11 +1,12 @@
 # Prospectra Production Deployment
 
-Updated: 2026-09-07
+Updated: 2026-09-29
 
 ## Preconditions
 
 - Back up the production database and uploaded storage before deploying.
-- Use PHP 8.4, Composer 2, Node.js, and pnpm versions compatible with the lockfiles.
+- Use PHP 8.4, Composer 2, Node.js 22, and the pnpm version pinned in `frontend/package.json` (`packageManager`).
+- **Frontend installs must use pnpm with the committed lockfile — `pnpm install --frozen-lockfile` from the `frontend/` directory. Never run `npm install` or `yarn`:** the repo has no `package-lock.json`, so npm resolves the caret ranges to the newest release. This is exactly how a deploy drifted onto an untested Next.js and failed its production build while CI stayed green (2026-09-29). A `preinstall` guard (`npx only-allow pnpm`) now aborts any non-pnpm install.
 - Keep all credentials in the hosting environment. Never copy a development environment file to production.
 - ADMIN_EMAIL may identify an existing administrator. AdminSeeder preserves that account's password hash.
 - Set AUDIT_SYNC_PROCESSING=false and run a durable queue worker in production.
@@ -37,7 +38,23 @@ Set NEXT_PUBLIC_API_URL to the production API origin, then run from the frontend
     pnpm install --frozen-lockfile
     pnpm build
 
-Deploy the generated Next.js application with its production start command or the hosting adapter already used by the project.
+The install must report pnpm and succeed silently on the frozen lockfile — if it prompts, warns about lockfile drift, or a `preinstall` guard error appears, stop: the checkout or the tooling on the box is wrong. Verify the built binary before starting it:
+
+    pnpm list next --depth=0   # must print the version pinned in package.json
+
+Deploy the generated Next.js application with its production start command or the hosting adapter already used by the project. If the host runs its own install step (dashboard builds, Git-push deploys), configure it to use pnpm with the lockfile — a host that defaults to npm will drift again.
+
+## Post-deploy verification
+
+After each deploy:
+
+    pnpm test:smoke https://prospetra.com
+
+The smoke script gates security headers, the verify-email edge rule, the dashboard auth loop, and every sitemap URL (status, noindex, canonical). A failed item is a rollback signal, not a follow-up ticket.
+
+## 2026-09-29 build-failure post-mortem
+
+A deploy failed with a Turbopack panic (`node process exited before we could connect to it` inside `parse_css` on `globals.css`). Cause: the box ran `npm install` (no `package-lock.json` in the repo), so `next: ^16.2.12` floated to the untested 16.3.6; CI built 16.2.12 with pnpm and stayed green. Fixes: `next` is now pinned exactly (no caret), `packageManager` pins pnpm, `preinstall` blocks non-pnpm installs, and this runbook is the authority for install commands.
 
 ## Queue and scheduler
 
