@@ -73,6 +73,10 @@ Resolution order for a repeat of the panic (2026-09-29, CI evidence attached):
 3. **If Turbopack still panics on the box**, build with webpack once to unblock the deploy: `pnpm build:webpack` (same Next version, bypasses Turbopack's PostCSS worker where the panic occurs). Report the panic log upstream, then treat the box's environment (memory limits, /tmp space, Node build) as the suspect.
 4. Confirm what the box actually runs: `pnpm list next --depth=0` must print the version pinned in `package.json`.
 
+## 2026-09-29 corepack pin mismatch (resolved)
+
+After Hostinger switched to pnpm, the deploy failed with `[ERROR] This project is configured to use 11.15.1 of pnpm. Your current pnpm is v11.21.0`. Cause: pnpm invoked through corepack does not self-switch versions, so the box's corepack pnpm 11.21.0 hard-failed against the strict `packageManager` check. Fix: `packageManager` bumped to `pnpm@11.21.0` (frontend `b0a1289`). Local direct-pnpm invocations auto-switch to the declared version, so keep the pin aligned with the deploy box's corepack pnpm if Hostinger upgrades it again. The `only-allow pnpm` preinstall guard stays.
+
 ## Queue and scheduler
 
 Run a supervised worker and restart it on each deployment:
