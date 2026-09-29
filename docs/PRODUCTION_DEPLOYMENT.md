@@ -54,7 +54,14 @@ The smoke script gates security headers, the verify-email edge rule, the dashboa
 
 ## 2026-09-29 build-failure post-mortem
 
-A deploy failed with a Turbopack panic (`node process exited before we could connect to it` inside `parse_css` on `globals.css`). Cause: the box ran `npm install` (no `package-lock.json` in the repo), so `next: ^16.2.12` floated to the untested 16.3.6; CI built 16.2.12 with pnpm and stayed green. Fixes: `next` is now pinned exactly (no caret), `packageManager` pins pnpm, `preinstall` blocks non-pnpm installs, and this runbook is the authority for install commands.
+A deploy failed with a Turbopack panic (`node process exited before we could connect to it` inside `parse_css` on `globals.css`). Cause: the box ran `npm install` (no `package-lock.json` in the repo), so `next: ^16.2.12` floated to the untested 16.3.6; CI built 16.2.12 with pnpm and stayed green. Fixes: `next` is now pinned exactly, `packageManager` pins pnpm, `preinstall` blocks non-pnpm installs, and this runbook is the authority for install commands.
+
+Resolution order for a repeat of the panic (2026-09-29, CI evidence attached):
+
+1. **Prove the checkout is current.** The failing log showed npm installing 858 packages — impossible on code containing the `only-allow pnpm` preinstall guard. The box was building a stale checkout. Run `git fetch origin && git log --oneline -1` and require it to match `origin/main` before anything else.
+2. **Install and build with pnpm** exactly as the Frontend release section says. CI's ubuntu build job is the reference: on commit `166d302` it built this same tree green on Linux with next 16.3.6, so a genuine fresh checkout has no known build failure.
+3. **If Turbopack still panics on the box**, build with webpack once to unblock the deploy: `pnpm build:webpack` (same Next version, bypasses Turbopack's PostCSS worker where the panic occurs). Report the panic log upstream, then treat the box's environment (memory limits, /tmp space, Node build) as the suspect.
+4. Confirm what the box actually runs: `pnpm list next --depth=0` must print the version pinned in `package.json`.
 
 ## Queue and scheduler
 
