@@ -56,6 +56,12 @@ Hostinger's Git deployment pipeline runs `npm install` by default (then retries 
 
 ## Post-deploy verification
 
+### 2026-10-08 Hostinger SWC/config compatibility
+
+The owner-provided build log for frontend `13fceda` failed while loading `next.config.ts`: native SWC required a missing `GLIBC_2.29` symbol, WASM was selected, and a generated config import was unresolved. The frontend configuration is now `next.config.mjs`, which Node loads directly without TypeScript/SWC config compilation. Existing settings are preserved and checked against the original resolved configuration. See [the compatibility report](../frontend/docs/HOSTINGER_CONFIG_COMPATIBILITY_2026-10-08.md) for evidence and the retry procedure.
+
+Keep Node 22, pinned pnpm and `pnpm run build` (`next build --webpack`). A local full WASM-fallback build passes; production still needs a fresh checkout/build of the compatibility commit. The native GLIBC warning may remain until the hosting Linux image is upgraded, but the configuration no longer depends on native or WASM TypeScript transformation.
+
 After each deploy:
 
     pnpm test:smoke https://prospetra.com
