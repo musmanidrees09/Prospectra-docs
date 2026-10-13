@@ -22,8 +22,8 @@ The frontend already normalizes `NEXT_PUBLIC_SITE_URL`, generates self-canonical
 Important gaps:
 
 - auth, workspace, and admin metadata/header rules currently use `nofollow`;
-- terms and privacy remain indexable;
-- the retired Pakistan service is linked and included in public-page inventory;
+- terms and privacy remain indexable pending deliberate review;
+- the Pakistan service remains linked and indexable until verified search, referral, and business evidence supports retirement;
 - the dynamic blog route currently returns a branded 404 for every slug;
 - global Organization schema does not yet contain all requested, verified profiles;
 - the audit UI labels the durable background execution state as queued;
@@ -46,12 +46,11 @@ The existing Next.js redirect rules remain as defense in depth and receive regre
 
 ### Crawl and index controls
 
-A static `frontend/public/robots.txt` will replace the generated robots route so the file is always available as a simple 200 response. It will allow crawling, disallow only non-page API paths, and advertise `https://prospetra.com/sitemap.xml`.
+A static `frontend/public/robots.txt` will replace the generated robots route so exactly one authoritative implementation is always available as a simple 200 response. It will allow crawling, disallow only non-page API paths, and advertise `https://prospetra.com/sitemap.xml`.
 
 Robots exclusions will not block auth or portal routes because crawlers must be able to read their `noindex` directive. Route metadata and `X-Robots-Tag` headers will consistently use `noindex, follow` for:
 
 - login, registration, logout, password reset, and verification routes;
-- terms and privacy;
 - dashboard/workspace routes;
 - admin/content-management routes;
 - tokenized audit reports and service-request utility routes.
@@ -62,11 +61,13 @@ Canonical tags remain limited to indexable public pages. Non-indexable applicati
 
 The existing Next.js sitemap generator remains dynamic. It will emit only indexable public routes and published blog posts whose canonical resolves to the production non-www origin. Entries include evidence-based `lastModified`, `changeFrequency`, and `priority` fields.
 
-The generator excludes auth, legal utility pages, portal routes, admin routes, tokenized reports, query variants, redirects, unpublished posts, the retired Pakistan service, and any backend-provided page marked noindex. Tests will reject off-origin, www, parameterized, redirected, or noindex entries.
+The generator excludes auth, portal routes, admin routes, tokenized reports, query variants, redirects, unpublished posts, and any backend-provided page marked noindex. Terms, privacy, and the Pakistan service remain included while they are canonical, indexable public pages. Tests will reject off-origin, www, parameterized, redirected, or noindex entries.
 
-### Retired service page
+### Pakistan accessibility service decision
 
-`/services/accessibility-audit-pakistan` will be removed from page inventory, footer navigation, the services page, the accessibility badge resource, and the sitemap. The route will return `410 Gone`, not redirect to an only loosely equivalent page. This explicitly reports intentional removal and avoids transferring users or signals to an irrelevant destination. Any useful accessibility language will link contextually to the free audit or website-fix page instead.
+The repository proves that `/services/accessibility-audit-pakistan` is a live, indexable, internally linked service page, but it contains no GSC URL-level export, backlink/referrer report, conversion evidence, or confirmation that the service has been retired. It will therefore remain canonical, indexable, linked, and sitemap-eligible in this implementation. Its claims and contextual links may be improved without changing its URL.
+
+A future removal decision requires verified evidence. Retain and improve it if the service is offered or the URL has search/referral/conversion value. Use a 301 only when a genuinely equivalent replacement serves the same intent. Use 410 only when the service is intentionally and permanently retired and no useful equivalent exists; then remove all internal links and sitemap references at the same deployment.
 
 ### Structured data and blog restoration
 
@@ -98,15 +99,17 @@ The HTTP request must not remain open while DNS, fetching, deterministic analysi
 
 Instead:
 
-1. quota is reserved transactionally using the existing `PlanLimitService` rules;
-2. the audit record is created and immediately moved to `analyzing` when work is accepted;
-3. the API returns the audit resource immediately;
+1. the client supplies one idempotency key for each deliberate submission and reuses it for network retries;
+2. quota reservation, audit creation, and a durable dispatch-outbox record are committed in one transaction using the existing `PlanLimitService` rules;
+3. the API returns the pending audit resource immediately and the UI says “Preparing your audit”;
 4. the frontend navigates directly to the audit detail page;
-5. the detail page polls the existing show endpoint while status is analyzing and displays concrete progress copy;
-6. the dedicated durable audit worker performs the pipeline and publishes completed, partial, or failed status;
-7. retries use the same state transition and quota reservation rules.
+5. the dispatcher queues work after commit, with bounded retries and scheduled recovery for temporary dispatch failure;
+6. the worker atomically claims a pending audit, changes it to `analyzing`, records `started_at`, a heartbeat, and a truthful coarse stage, and the UI says “Analyzing the website”;
+7. the detail page polls while pending or analyzing and announces state changes accessibly without invented percentages;
+8. the dedicated durable audit worker performs the pipeline and publishes completed, partial, or failed status;
+9. duplicate requests return the original audit without consuming another quota slot, and retries use the same reservation and recovery rules.
 
-The queue remains an internal delivery mechanism for reliability, but it is not presented as the user experience. Customer copy will say “Starting your audit” and “Analyzing the website now,” never “added to queue” or “queued for retry.” Operationally, production must run a dedicated worker for the `ai` queue with low concurrency appropriate to outbound audit limits. Monitoring will alert on stale analyzing records so a stopped worker is visible to administrators.
+The queue remains an internal delivery mechanism for reliability, but it is not presented as the user experience. Customer copy will say “Preparing your audit” and “Analyzing the website,” never “added to queue” or “queued for retry.” Operationally, production must run a dedicated worker for the `ai` queue with low concurrency appropriate to outbound audit limits. Queue `retry_after` must exceed the job/worker timeout. Scheduled reconciliation drains undispatched outbox rows, detects delayed pending audits and stale analyzing heartbeats, performs bounded safe recovery, and logs terminal dispatch/worker failures. Failed audits remain excluded from quota consumption under the existing entitlement rules.
 
 This design preserves DNS pinning, `SafeWebsiteUrl`, response size/type limits, provider isolation, and tenant-scoped authorization.
 
@@ -114,9 +117,10 @@ This design preserves DNS pinning, `SafeWebsiteUrl`, response size/type limits, 
 
 - Redirect and canonical helpers reject credentials, unexpected origins, queries, and fragments where canonical URLs are expected.
 - Blog API failure falls back safely for listings/sitemaps and returns an appropriate not-found or unavailable response for article routes rather than emitting invented content.
-- Audit dispatch failure changes the audit to failed with a safe classified message rather than leaving it indefinitely analyzing.
+- Temporary dispatch failure remains recoverable in the durable outbox; terminal bounded failure changes the still-pending audit to failed with a safe classified message rather than stranding it.
+- Worker claims and terminal writes are state-guarded so duplicate delivery or stale recovery cannot overwrite completed, partial, or failed results.
 - Existing partial-audit behavior remains intact when optional provider data is unavailable; missing evidence never becomes Passed.
-- Stale analyzing audits remain recoverable through the existing admin retry workflow.
+- Stale pending and analyzing audits are detected by scheduled reconciliation and remain recoverable through the existing admin retry workflow.
 
 ## Verification
 
