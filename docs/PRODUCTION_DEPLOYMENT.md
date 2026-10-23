@@ -1,6 +1,6 @@
 # Prospectra Production Deployment
 
-Updated: 2026-09-29
+Updated: 2026-10-23
 
 ## Preconditions
 
@@ -54,6 +54,23 @@ Hostinger's Git deployment pipeline runs `npm install` by default (then retries 
 
 `npx pnpm` needs no global install and satisfies the preinstall guard (pnpm's user agent is what `only-allow` checks). Do not remove the guard to let npm through — if the install/build command fields are not editable on the plan, the fallback is to drop the guard and commit a generated `package-lock.json` for determinism, which is a deliberate decision to record here first.
 
+### Canonical production origin
+
+The only indexable production origin is `https://prospetra.com`. Keep `http://prospetra.com`, `http://www.prospetra.com`, and `https://www.prospetra.com` reachable only as permanent redirect sources; do not remove the `www` DNS record or block these variants in `robots.txt`, because crawlers and old links must be able to reach the canonical URL.
+
+The application has explicit 301 rules for HTTP apex and both `www` schemes, preserves the path/query, and emits only HTTPS-apex canonicals, internal links, structured data, robots sitemap references, and sitemap URLs. Hostinger's CDN can still run before Next.js. On 2026-10-23 the live behavior was:
+
+| Request | Live result | Required result |
+| --- | --- | --- |
+| `http://prospetra.com/path` | one 301 to HTTPS apex | pass |
+| `https://www.prospetra.com/path` | one 301 to HTTPS apex | pass |
+| `http://www.prospetra.com/path` | 301 to HTTPS www, then 301 to HTTPS apex | one 301 directly to HTTPS apex |
+| `https://prospetra.com/path` | 200 | pass |
+
+To remove the remaining CDN-level chain, configure a **permanent 301 at the Hostinger edge** for `www.prospetra.com` to `https://prospetra.com`, preserving the path and query. In hPanel, use Websites → Dashboard → Redirects and select the `www` host as the source. If that rule cannot run before Hostinger's automatic HTTP-to-HTTPS upgrade, ask Hostinger support to apply the equivalent CDN/edge rule; changing Next.js cannot pre-empt a redirect already returned by the CDN. Do not disable the CDN or change DNS as a shortcut without a separate availability review.
+
+Acceptance test: all three alternate origins must return `301` with an exact `Location: https://prospetra.com/<same-path>?<same-query>` in a single response, while the canonical origin returns `200`. The post-deploy smoke command below enforces this behavior.
+
 ## Post-deploy verification
 
 ### 2026-10-08 Hostinger SWC/config compatibility
@@ -66,7 +83,7 @@ After each deploy:
 
     pnpm test:smoke https://prospetra.com
 
-The smoke script gates security headers, the verify-email edge rule, the dashboard auth loop, and every sitemap URL (status, noindex, canonical). A failed item is a rollback signal, not a follow-up ticket.
+The smoke script gates one-hop canonical-origin redirects, security headers, the verify-email edge rule, the dashboard auth loop, and every sitemap URL (status, noindex, canonical). A failed item is a rollback signal, not a follow-up ticket.
 
 ## 2026-09-29 build-failure post-mortem
 
@@ -91,15 +108,120 @@ Update (same day, frontend `0f2749c`): the direct-dependency pin alone was NOT s
 
 ## Queue and scheduler
 
-Run a supervised worker and restart it on each deployment:
+The audit pipeline uses two dedicated queues. `audit-fast` publishes the deterministic initial report; `audit-enrichment` runs optional external providers and grounded AI after that report is visible. A worker that only consumes `default` or the legacy `ai` queue will not process audit jobs.
 
-    php artisan queue:work --queue=ai,default --sleep=2 --tries=3 --timeout=210 --max-time=3600
+### Hosting capability gate
 
-Run the Laravel scheduler once per minute:
+Do not assume that an hPanel website has Supervisor access. Hostinger documents port `65002` and home-directory-restricted SSH for Web/Cloud hosting, and documents cron as the supported scheduler there. A VPS provides the system-level control needed for Supervisor/systemd. Confirm the actual plan and process manager in hPanel before changing production; an SSH endpoint on port `65002` is evidence of Web/Cloud hosting, not proof that `sudo supervisorctl` is available.
 
-    php artisan schedule:run
+The sub-30-second initial-report objective requires continuously supervised `audit-fast` consumers. A once-per-minute cron invocation can leave a new job waiting nearly a minute and is not an equivalent production configuration. If the current plan exposes only cron, use cron for Laravel's scheduler, but move the queue workers to a VPS or another persistent process service before declaring the rollout complete. Do not install a long-running `nohup` worker or overlapping cron-worker workaround without a separate resource and reliability review.
 
-The scheduler intentionally does not retry every failed job. AnalyzeWebsiteJob marks exhausted audits failed, and user-requested retries remain quota controlled.
+Hostinger references:
+
+- [SSH access on Web/Cloud hosting is restricted to the account home directory](https://support.hostinger.com/en/articles/1583645-how-to-enable-ssh-access)
+- [Hostinger Web/Cloud SSH uses port 65002](https://support.hostinger.com/en/articles/1583736-what-ports-are-open-at-hostinger)
+- [hPanel cron job configuration](https://support.hostinger.com/en/articles/1583465-how-to-set-up-a-cron-job-at-hostinger)
+
+Before installing process definitions, record the real application path and available manager from the production shell. Do not substitute the example `/var/www` path below until these checks pass:
+
+```bash
+pwd -P
+test -f artisan
+php -v
+composer --version
+command -v supervisorctl || command -v systemctl || true
+git rev-parse HEAD
+```
+
+Run all three worker groups under Supervisor, systemd, or an equivalent process manager. The following Supervisor configuration is the production baseline; replace `/var/www/prospetra/backend`, `www-data`, and log paths for the host:
+
+```ini
+[program:prospetra-audit-fast]
+process_name=%(program_name)s_%(process_num)02d
+command=php artisan queue:work database --queue=audit-fast --sleep=1 --tries=1 --timeout=45 --max-time=3600
+directory=/var/www/prospetra/backend
+user=www-data
+numprocs=2
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/prospetra/audit-fast.log
+stopwaitsecs=55
+
+[program:prospetra-audit-enrichment]
+process_name=%(program_name)s_%(process_num)02d
+command=php artisan queue:work database --queue=audit-enrichment --sleep=1 --tries=1 --timeout=130 --max-time=3600
+directory=/var/www/prospetra/backend
+user=www-data
+numprocs=3
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/prospetra/audit-enrichment.log
+stopwaitsecs=140
+
+[program:prospetra-general]
+process_name=%(program_name)s_%(process_num)02d
+command=php artisan queue:work database --queue=ai,emails,default --sleep=2 --tries=3 --timeout=210 --max-time=3600
+directory=/var/www/prospetra/backend
+user=www-data
+numprocs=1
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/prospetra/general-worker.log
+stopwaitsecs=220
+```
+
+For the database queue, `DB_QUEUE_RETRY_AFTER` must remain greater than the longest worker timeout. The production default of 240 seconds is valid for the 130-second enrichment worker. If Redis is selected instead, set `REDIS_QUEUE_RETRY_AFTER` to the same safe value.
+
+After installing or changing the process definitions:
+
+    sudo supervisorctl reread
+    sudo supervisorctl update
+    sudo supervisorctl restart prospetra-audit-fast:*
+    sudo supervisorctl restart prospetra-audit-enrichment:*
+    sudo supervisorctl restart prospetra-general:*
+
+Do not use `queue:retry all` as recovery. Audit retries through the API reserve quota correctly; the scheduled audit recovery command handles jobs stranded before terminal state.
+
+Run the Laravel scheduler once per minute (cron) or as a supervised `php artisan schedule:work` process:
+
+    * * * * * cd /var/www/prospetra/backend && php artisan schedule:run >> /dev/null 2>&1
+
+The scheduler performs four audit control-plane duties: dispatching pending audit outbox rows, dispatching due enrichment tasks, recovering stale work every five minutes, and sending queue heartbeat jobs every minute.
+
+Monitor the pipeline with:
+
+    php artisan audits:queue-health --json
+    php artisan queue:failed
+    php artisan schedule:list
+
+`audits:queue-health` must report `healthy: true`, fresh positive heartbeat ages for both queues, no unexplained queue-depth growth, and zero stale pending audits. Alert when it exits non-zero, when `failed_jobs` grows, or when either required queue depth rises continuously. The recovery command is safe to inspect manually with `php artisan audits:recover-stale --dry-run`; the scheduler runs the bounded repair without `--dry-run`.
+
+Required audit environment values are listed in `backend/.env.example`. Keep `AUDIT_SYNC_PROCESSING=false`; leave external providers and AI disabled until their explicit privacy/cost opt-ins and credentials are approved. `AUDIT_CORE_BUDGET_SECONDS=25` keeps the fast worker inside its 45-second process timeout under supported network conditions.
+
+Deployment order for these migrations:
+
+1. Back up the database and current environment.
+2. Deploy backend code and run `composer install`.
+3. Run `php artisan migrate --force` to add audit lifecycle fields, enrichment tasks, execution/quota reservations, and nullable editorial byline fields.
+4. Apply the new environment values, then run `php artisan optimize:clear && php artisan config:cache`.
+5. Install/update the three worker groups and the scheduler, then run `php artisan queue:restart`.
+6. Run `php artisan audits:queue-health --json`; allow up to one scheduler minute for the first heartbeat.
+7. Submit a controlled audit and confirm initial publication, background enrichment, history visibility, lead conversion, and Print/PDF before opening normal traffic.
+
+The reviewed article sources are not applied by the migration. After the owner has supplied and approved the final Prospetra GSC case-study figures and named byline, take a database backup and run this explicit content command during the approved release window:
+
+    php artisan blog:publish-reviewed-articles --all
+
+The command updates only the five known slugs, validates every requested slug before the transaction, preserves each record's slug, publication date, author relation, named byline, bio, and reviewer, and does not create any additional article slug. Verify all five public URLs, title/H1 metadata, author box, reviewer line when present, related-article cards, and sitemap timestamps after publication.
 
 ## Audit provider configuration
 

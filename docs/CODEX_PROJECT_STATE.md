@@ -1,10 +1,40 @@
 # Prospectra Codex Project State
 
-Updated: 2026-10-08
+Updated: 2026-10-23
+
+## 2026-10-23 canonical-origin verification
+
+- `https://prospetra.com` is the sole canonical origin in application metadata, sitemap URLs, robots, structured data, and internal navigation. Live checks confirm that it returns 200, while HTTP apex and HTTPS www return permanent redirects to it.
+- Hostinger CDN currently makes `http://www.prospetra.com` take two permanent hops (`http://www` → `https://www` → `https://` apex). The application already has a direct one-hop rule, but the CDN response occurs first. Production needs an approved Hostinger edge redirect from the www host directly to the HTTPS apex; exact instructions and an automated one-hop smoke gate are in `docs/PRODUCTION_DEPLOYMENT.md`.
+- Search Console's `Page with redirect` classification for the old HTTP URLs is expected: those source URLs should not be indexed. Do not validate the issue as if the redirect should disappear; inspect/request indexing for `https://prospetra.com/` and keep only HTTPS-apex URLs in the sitemap.
+
+## 2026-10-22 two-stage audit pipeline implementation
+
+- Audits now run on dedicated `audit-fast` and `audit-enrichment` queues. The fast job publishes deterministic crawl/SEO/technical/security/accessibility/contact evidence first; PageSpeed and other optional providers plus evidence-grounded AI update the same report afterward without changing deterministic scoring truth.
+- Durable per-provider enrichment tasks, report revisions, lifecycle timestamps, bounded retries, failure isolation, stale-work recovery, failed-job error codes, scheduler dispatch, and executed-worker heartbeats are implemented. `php artisan audits:queue-health --json` is the operational readiness probe.
+- The report and history UIs poll while work is active, render the initial report immediately, distinguish complete versus partially unavailable enrichment, and stop polling in terminal states. Existing report sections, lead creation, saved history, share/copy, and Print/PDF remain in place.
+- Local real-network evidence on 2026-10-22: existing `axelsports.store` initial report published in 7 seconds (score 96, coverage 95.4%) and enriched in 40 seconds; existing `ai.toolscase.com` initial report published in 10 seconds (score 89, coverage 90.8%) and reached partial enrichment in 33 seconds because RDAP was unavailable while AI and all other configured tasks succeeded. A newly submitted `ai.toolscase.com` audit published its initial report in 15 backend seconds and the unchanged browser page showed it within 28.1 wall-clock seconds, then automatically updated to terminal partial enrichment at 43.8 seconds.
+- Authenticated browser QA verified the completed and partial reports, audit history, lead creation from observed public phone evidence, and the Print/PDF handler. A deliberately network-isolated worker run failed both live targets with the safe `dns_failure` state rather than leaving them in PREPARING.
+- Final reliability review added per-execution tokens so an obsolete worker (including a pre-upgrade tokenless job) cannot overwrite a newer retry, current-month quota reservations for old-audit retries, legacy null-timestamp recovery, and cached-report retention during transient polling failures. The final backend suite passes 538 tests / 1,912 assertions; the frontend passes 118 tests, type-check, lint, and a 45-page production build.
+- Production deployment was not performed. Apply the migration, environment variables, dedicated worker groups, scheduler, and monitoring described in `docs/PRODUCTION_DEPLOYMENT.md` before release.
+
+## 2026-10-22 reviewed article revision status
+
+- The five existing reviewed article sources retain their original slugs; no article was added. Accessibility was retitled to the requested WCAG 2.2 title, the SEO guide now leads with the indexed-but-not-ranking angle, repeated shared-topic explanations were shortened and linked to their owner guides, the conflicting score-77 sample and editor note were removed, and accessibility/health/Core Web Vitals now use distinct saved audit measurements.
+- Introductory lists and HTML-looking inline code render correctly, related articles use titles plus descriptions, and nullable named-author/bio/reviewer fields are supported by the database, admin editor, public API, page UI, and Article structured data.
+- The checked-in frontend fallback payload is synchronized with the five reviewed sources, so the revised titles, lists, examples, and related content also render during an API outage. Two owner-supplied facts remain intentionally unset: the real Prospetra Search Console dataset for the SEO case study and the exact author name/bio/reviewer. Do not invent or publish placeholders; synchronize the final facts into the fallback again after they are supplied.
 
 ## Current phase
 
-The requested production-readiness implementation is complete in the repository. Deployment and real-provider activation remain operational steps that require production credentials, hosting access, and quota approval.
+The two-stage audit production-readiness implementation is complete in the repository. Deployment and real-provider activation remain operational steps that require production credentials, hosting access, and quota approval. The separate article revision is code-complete except for the owner-supplied GSC and byline facts documented above.
+
+## 2026-10-23 production deployment preflight
+
+- Release candidates are clean and equal to their fetched upstream branches: backend `8039e25b009bc1ea6947073c009ce89ded6185ef`; frontend `6448594f0aacef897e813231e7d693f36af6dfc7`.
+- Fresh release gates pass: Composer validation, 538 backend tests / 1,912 assertions, Pint, frontend type-check, lint, 118 frontend tests, and the 45-page Next.js 16.3.8 production build.
+- The live frontend contains the two-stage loading/automatic-update UI. The read-only production smoke gate passes 10/11 checks; the only failure remains Hostinger's two-hop `http://www` redirect. This does not prove that the backend migrations or dedicated workers are deployed.
+- No production backup, migration, worker change, stale recovery, or controlled audit was performed. The available browser profiles were not authenticated to hPanel or Prospetra, and the repository contains no production SSH target/username. Do not claim this release is deployed until those gates are completed.
+- The known Hostinger SSH endpoints use port 65002, which indicates Web/Cloud-style access but does not prove the hosting plan. The production runbook now requires an explicit capability check: cron remains valid for `schedule:run`, but the sub-30-second audit target requires persistent supervised workers on a VPS or equivalent process service.
 
 ## 2026-10-08 frontend SEO follow-up completed
 
