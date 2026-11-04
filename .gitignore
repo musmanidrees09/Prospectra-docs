@@ -12,6 +12,7 @@
 /dogfood-output/
 .tmp-*
 *.log
+*.tsbuildinfo
 
 # Never track secrets anywhere
 .env
